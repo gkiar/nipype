@@ -42,7 +42,6 @@ def generate_boutiques_descriptor(
     # Retrieves Nipype interface
     if isinstance(module, (str, bytes)):
         import_module(module)
-        module_name = str(module)
         module = sys.modules[module]
     else:
         module_name = str(module.__name__)
@@ -59,13 +58,13 @@ def generate_boutiques_descriptor(
     tool_desc[
         'description'] = interface_name + ", as implemented in Nipype (module: " + module_name + ", interface: " + interface_name + ")."
     tool_desc['inputs'] = []
-    tool_desc['outputs'] = []
-    tool_desc['tool-version'] = interface.version
-    tool_desc['schema-version'] = '0.2-snapshot'
+    tool_desc['output-files'] = []
+    tool_desc['tool-version'] = str(interface.version)
+    tool_desc['schema-version'] = '0.5'
     if docker_image:
-        tool_desc['docker-image'] = docker_image
+        tool_desc['container-image'] = docker_image
     if docker_index:
-        tool_desc['docker-index'] = docker_index
+        tool_desc['index'] = docker_index
 
     # Generates tool inputs
     for name, spec in sorted(interface.inputs.traits(transient=None).items()):
@@ -73,23 +72,25 @@ def generate_boutiques_descriptor(
                                     ignored_template_inputs, verbose,
                                     ignore_template_numbers)
         tool_desc['inputs'].append(input)
-        tool_desc['command-line'] += input['command-line-key'] + " "
+        tool_desc['command-line'] += input['value-key'] + " "
         if verbose:
             print("-> Adding input " + input['name'])
 
     # Generates tool outputs
+    print(outputs.traits(transient=None).items())
     for name, spec in sorted(outputs.traits(transient=None).items()):
+        print(name, spec)
         output = get_boutiques_output(name, interface, tool_desc['inputs'],
                                       verbose)
         if output['path-template'] != "":
-            tool_desc['outputs'].append(output)
+            tool_desc['output-files'].append(output)
             if verbose:
                 print("-> Adding output " + output['name'])
         elif verbose:
             print("xx Skipping output " + output['name'] +
                   " with no path template.")
-    if tool_desc['outputs'] == []:
-        raise Exception("Tool has no output.")
+    if tool_desc['output-files'] == []:
+        del tool_desc['output-files']
 
     # Removes all temporary values from inputs (otherwise they will
     # appear in the JSON output)
@@ -125,7 +126,7 @@ def get_boutiques_input(inputs, interface, input_name, spec,
     input['name'] = input_name.replace('_', ' ').capitalize()
     input['type'] = get_type_from_spec_info(spec_info)
     input['list'] = is_list(spec_info)
-    input['command-line-key'] = "[" + input_name.upper(
+    input['value-key'] = "[" + input_name.upper(
     ) + "]"  # assumes that input names are unique
     input['command-line-flag'] = ("--%s" % input_name + " ").strip()
     input['tempvalue'] = None
@@ -184,11 +185,16 @@ def get_boutiques_output(name, interface, tool_inputs, verbose=False):
         'optional'] = True  # no real way to determine if an output is always produced, regardless of the input values.
 
     # Path template creation.
-
-    output_value = interface._list_outputs()[name]
-    if output_value != "" and isinstance(
-            output_value,
-            str):  # FIXME: this crashes when there are multiple output values.
+    if name in [t['id'] for t in tool_inputs]:
+        tool = [t for t in tool_inputs if t['id'] == name][0]
+        output_value = tool['value-key']
+    else:
+        output_value = interface._list_outputs()[name]
+    print(name)
+    print(output)
+    print(output_value)
+    if output_value != "" and isinstance(output_value, (str, list)):
+        print(output_value)
         # Go find from which input value it was built
         for input in tool_inputs:
             if not input['tempvalue']:
@@ -201,7 +207,7 @@ def get_boutiques_output(name, interface, tool_inputs, verbose=False):
             if str(input_value) in output_value:
                 output_value = os.path.basename(
                     output_value.replace(input_value,
-                                         input['command-line-key'])
+                                         input['value-key'])
                 )  # FIXME: this only works if output is written in the current directory
         output['path-template'] = os.path.basename(output_value)
     return output
